@@ -1,0 +1,6 @@
+get MonthRotate daynumber: vnstat --showconfig | grep MonthRotate | awk '{print $2}'
+
+vnstat --oneline
+1;eth0;10/11/10;374 KiB;38 KiB;412 KiB;5.28 kbit/s;Oct '10;7.14 MiB;937 KiB;8.06 MiB;0.08kbit/s;7.14 MiB;937 KiB;8.06 MiB
+?;interface;date since; today rx; today tx; today total; today avg rate;month;month's rx;month's tx;month's total;month's avg rate;total rx; total tx; total
+0	1			2			3		4			5			6				7	8			9			10			11					12		13		14

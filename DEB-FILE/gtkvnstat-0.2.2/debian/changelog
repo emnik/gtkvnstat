@@ -1,0 +1,7 @@
+gtkvnstat (0.2.2) unstable; urgency=low
+
+  * Added Nice Mono Icons from Giannis Petrakis
+  * Fixed Zero Division Error when Free Limit was set to zero!
+  * Fixed Info when free limit was set in GBs and we have downloaded Kbs.
+
+ -- Manos Nikiforakis <manos@manos-desktop>  Mon, 17 Jan 2011 12:28:58 +0200

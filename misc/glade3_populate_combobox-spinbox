@@ -1,0 +1,19 @@
+		#GENERAL Populating a combobox
+		#self.combobox1 = builder.get_object("combobox1")
+		#liststore = gtk.ListStore(gobject.TYPE_STRING)
+		#dynentries = ['foo1', 'foo2', 'foo3']
+		#for entry in words dynentries:
+		#	liststore.append([entry])
+		#self.combobox1.set_model(liststore)
+		#cell = gtk.CellRendererText()
+		#self.combobox1.pack_start(cell, True)
+		#self.combobox1.add_attribute(cell, 'text', 0)
+		
+		
+		#Properties of spinbutton1 (FreeLimit)
+		#self.spinbutton1 = builder.get_object("spinbutton1")
+		#self.spinbutton1.set_digits(2)
+		#self.spinbutton1.set_update_policy(gtk.UPDATE_IF_VALID)
+		#self.spinbutton1.set_numeric(True)
+		#self.spinbutton1.set_range(0, 999)
+		#self.spinbutton1.set_increments(1.0, 10.0)

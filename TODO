@@ -1,0 +1,20 @@
+version 0.1
+make a gkt version of the gui, use appindicator and notify OSD 
+
+version 0.2 --initial public version--
+many changes in the code to handle both cases (vnstat daemon or vnstat cron)
+
+version 0.2.1 
+minor fixes when free limit is set on GBs
+
+TODO for version 0.3...
+1.Use a combobox signal to reset config file after question.
+2.have a menu option to reset config.
+3.many configs for many interfaces.
+ex.
+[eth0]
+....
+[pp0]
+...
+
+

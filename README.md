@@ -1,0 +1,15 @@
+gtkvnstat v0.2
+Copyright 2010 Nikiforakis Manos under GPL3 licence
+
+Based on Qvnstat 0.1 originaly written in 2008 from Diamantis Dimitris. All the ui code is rewritten from scratch in GTK, the code altered from script to OOP and many modifications have been made to conform with the recent vnstat version (1.10) either using the daemon mode or not. I've used glade3, pyGTK and jeany editor. The app is an indicator app that sits on gnome panel and make use of gnome's notification system to show the network traffic info, the free remaining data and the cost.
+
+ATTENTION: The cost is calculated per KB or MB but not in steps e.g per 10kb!!! The program should be considered as a beta version regarding it's info.
+
+USE THE PROGRAM AT YOUR OWN RISK!
+
+With vnstat you have 2 options to monitor your traffic. You could change the MonthRotate * Option in /etc/vnstat.conf to match your monthly billing period, or you can manually schedule data counter resets ** EVERY x days! If you run vnstat as a daemon (default), you should have sudo privileges to manual reset!
+
+*Using Monthrotate you also keep a history off all your data as none of it gets deleted!
+
+**Every time you do a manual reset, scheduled or not (via the menu), ALL your data get's deleted and everything starts to count from the beginning.
+

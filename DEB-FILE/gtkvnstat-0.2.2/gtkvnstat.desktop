@@ -1,0 +1,8 @@
+[Desktop Entry]
+Encoding=UTF-8
+Name=Gtkvnstat
+Exec=/usr/bin/gtkvnstat
+Terminal=false
+Type=Application
+Categories=GTK;WebBrowser;Network
+Icon=/usr/share/pixmaps/gtkvnstat.png

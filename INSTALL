@@ -1,0 +1,13 @@
+REQUIREMENTS
+
+vnstat
+python-notify
+indicator-*
+
+-------------------------------------------------------------------------
+
+INSTALL
+
+just edit gtkvnstat.py, change BINDIR in line 33 to the path you put gtkvnstat.py and gtkvnstat.glade
+
+

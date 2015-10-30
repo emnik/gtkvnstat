@@ -1,0 +1,34 @@
+Short answer:
+
+Add the following to your /etc/sudoers file, replacing username with the proper username:
+
+username ALL = /etc/init.d/apache2
+
+If you want to not have to type in a password before you do this, use the following:
+
+username ALL = NOPASSWD: /etc/init.d/apache2
+
+After this, the 'username' user can execute 'sudo /etc/init.d/apache2 start (or stop, restart,etc)
+
+Long answer: You'll likely want to setup a separate user for this if you haven't already, and then configure the /etc/sudoers file to allow a user or group to execute the command you want.
+
+For example, to allow the user 'ben' to execute all commands as root prompting for a password, you would do the following:
+
+ben ALL= ALL
+
+To allow 'ben' to execute only one command (like say, rm'), you would do the following:
+
+ben ALL= /bin/rm
+
+If you are running a script as a user and don't want to prompt for a password, you'll want to use the 'NOPASSWD' option like so:
+
+ben ALL=NOPASSWD: /bin/commandname options
+
+ben ALL=NOPASSWD: /bin/commandname options
+
+You can do the same thing for groups by prefxing group names with a percentage sign, like so:
+
+%supportstaff ALL= NOPASSWD: /bin/commandname
+
+Also - don't edit this file directly, use the 'visudo' command which enables syntax checking of the sudoers file (the syntax is somewhat arcane if you haven't worked with it before). If you must edit it directly, be sure to run 'visudo -c' afterwards to check the syntax.
+

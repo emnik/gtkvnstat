@@ -1,0 +1,13 @@
+Source: gtkvnstat
+Section: web
+Priority: optional
+Maintainer: Manos Nikiforakis (emnik) <nikiforakis.m@gmail.com>
+Build-Depends: debhelper (>= 7.0.50~)
+Standards-Version: 3.8.4
+Homepage: http://code.google.com/p/gtkvnstat/
+
+Package: gtkvnstat
+Architecture: all
+#Depends: ${shlibs:Depends}, ${misc:Depends}
+Depends: ${python:Depends}, vnstat (>= 1.10), python (>=2.6), python-gtk2 (>=2.0), python-notify, python-appindicator
+Description: A gtk interface (gnome's indicator) for vnstat.

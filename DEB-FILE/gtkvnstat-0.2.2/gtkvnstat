@@ -1,0 +1,791 @@
+#!/usr/bin/env python
+
+#########################################################################################
+# GTKvnstat (Version 0.2.2) is a PyGTK application that monitor the traffic from        #
+# a network interface                                                                   #
+# Depends on: PyGTK, vnstat                                                             #
+# Based on Qvnstat 0.1 Copyright (C) 2008 Dimitris Diamantis (aka ftso)                 #
+# kotsifi@gmail.com                                                                     #
+#                                                                                       #
+#                                                                                       #
+# Copyright (C) 2010 Nikiforakis Manos (nikiforakis.m@gmail.com)                        #
+#                                                                                       #
+# This is free software. You may redistribute copies of it under the terms of           #
+# the GNU General Public License <http://www.gnu.org/licenses/gpl.html>                 #
+#                                                                                       #
+#                                                                                       #
+# vnStat 1.10 by Teemu Toivola <tst at iki dot fi>                                      #
+#                                                                                       #
+#########################################################################################
+
+
+import pygtk
+pygtk.require("2.0")
+import gtk, gobject
+import subprocess,sys,os,datetime,time,errno
+import appindicator
+import pynotify
+
+#global variables
+HOMEDIR=os.environ["HOME"]
+TEMPDIR="/.gtkvnstat/"
+GTKVNSTATHOME=HOMEDIR+TEMPDIR
+#BINDIR = HOMEDIR + "/Desktop/gtkvnstat-0.2.2/" # <<< SET The path where gtkvnstat.py and gtkvnstat.glade stands
+BINDIR = "/usr/bin/"
+ICONSDIR = "/usr/share/pixmaps/"
+
+class GTKvnstatIndicator(object):
+    def __init__(self):
+        self.ind = appindicator.Indicator ("example-simple-client", "indicator-messages", appindicator.CATEGORY_APPLICATION_STATUS)
+        self.ind.set_status (appindicator.STATUS_ACTIVE)
+        #self.ind.set_attention_icon ("/home/manos/Desktop/gtkvnstat-app/sad.png")
+        self.ind.set_attention_icon (ICONSDIR + "gtkvnstat_sad.png")
+        #self.ind.set_icon("/home/manos/Desktop/gtkvnstat-app/happy.svg")
+        self.ind.set_icon(ICONSDIR + "gtkvnstat_happy.svg")
+        
+        gobject.timeout_add(200000, self.seticon) #check every 5 minutes
+        self.seticon()
+        
+        # create a menu
+        self.menu = gtk.Menu()
+
+        # create items for the menu - labels, checkboxes, radio buttons and images are supported:
+        
+        item1 = gtk.MenuItem("Preferences")
+        item1.connect("activate", self.showPref)
+        item1.show()
+        self.menu.append(item1)
+
+        sep = gtk.SeparatorMenuItem()
+        sep.show()      
+        self.menu.append(sep)
+
+        item2 = gtk.MenuItem("Show Traffic Info")
+        item2.connect("activate", self.showInfo)
+        item2.show()
+        self.menu.append(item2)
+ 
+ 
+        self.check = gtk.CheckMenuItem("Use Detailed Info")
+        self.check.show()
+        self.menu.append(self.check)
+
+        sep = gtk.SeparatorMenuItem()
+        sep.show()      
+        self.menu.append(sep)
+        
+        '''
+        radio = gtk.RadioMenuItem(None, "Radio Menu Item")
+        radio.show()
+        self.menu.append(radio)'''
+
+        item3 = gtk.MenuItem("Reset Counters")
+        item3.connect("activate", self.RSData)
+        item3.show()
+        self.menu.append(item3)
+        
+        
+        item4 = gtk.MenuItem("About")
+        item4.connect("activate", self.About)
+        item4.show()
+        self.menu.append(item4)
+
+        sep = gtk.SeparatorMenuItem()
+        sep.show()      
+        self.menu.append(sep)
+        
+
+        image = gtk.ImageMenuItem(gtk.STOCK_QUIT)
+        image.connect("activate", self.quit)
+        image.show()
+        self.menu.append(image)
+                    
+        self.menu.show()
+
+        self.ind.set_menu(self.menu)
+
+
+    def quit(self, widget, data=None):
+        gtk.main_quit()
+
+    def showInfo(self, widget, data=None): 
+        details = self.check.get_active()
+        GTKvnstat().vnstatInfo(details) 
+        
+    def showPref(self, widget, data=None): 
+        GTKvnstat().window.show()
+    
+    def RSData(self, widget, data=None): 
+        GTKvnstat().ResetDataNowDialog()
+
+    def About(self, widget, data=None):
+        about = gtk.AboutDialog()
+        about.set_program_name("GTKvnstat")
+        about.set_version("0.2.2")
+        about.set_copyright("(c) 2010, 2011 Nikiforakis Manos\n Mono icons by Giannis Perrakis")
+        #about.set_logo(gtk.gdk.pixbuf_new_from_file("battery.png"))
+        about.set_comments("GTKvnstat is a GTK frontend to vnstat written in python")
+        about.set_website("http://code.google.com/p/gtkvnstat/")
+        about.run()
+        about.destroy()
+
+    def seticon(self):
+        state = GTKvnstat().checkCurrentState()
+        #print state
+        if state == "Over" or state == "Hot":
+            self.ind.set_status(appindicator.STATUS_ATTENTION)
+        else:
+            self.ind.set_status(appindicator.STATUS_ACTIVE)
+        return True
+
+
+class GTKvnstat(object):       
+    def __init__(self):
+        builder = gtk.Builder()
+        builder.add_from_file(BINDIR + "GTKvnstat.glade")
+        self.window = builder.get_object("window1")
+        
+        self.NetInterfaces = builder.get_object("combobox1")
+        self.FreeLimit = builder.get_object("spinbutton1")
+        self.FreeLimitCap = builder.get_object("combobox3")
+        self.Money = builder.get_object("spinbutton2")
+        self.MoneyCap = builder.get_object("combobox2")
+        self.ResetTimeNum = builder.get_object("spinbutton3")
+        #self.ResetTime = builder.get_object("combobox4")    
+        self.Currency = builder.get_object("entry1")
+        self.ManualReset = builder.get_object("checkbutton1")
+        
+                
+        builder.connect_signals({ "on_button1_button_release_event" : self.button1_pressed,
+                                  "on_button2_button_release_event" : self.button2_pressed,
+                                  "on_checkbutton1_toggled" : self.checkbutton1_toggled})
+
+        self.FileReadConf() #read the configuration file
+
+        
+        #Populate combobox1 entries (network interfaces)
+        self.NetInterfaces.set_active(0)
+        ifaceliststore=self.NetInterfaces.get_model()
+        Ctext1 = len(ifaceliststore)
+        if Ctext1 == 1: #only 'none'
+            interf = subprocess.Popen(["ifconfig -a -s | sed -e '/Iface/d' | awk '{ print $1 }'"],shell=True, stdout=subprocess.PIPE)
+            interf2 = interf.stdout.read()
+            words = interf2.split()
+            wordCount = len(words)
+            for entry in words:
+                ifaceliststore.append([entry])
+    
+        #-----Populate comboboxes with the use of self.populatecombo() function---------#
+        #Populate Active Network Interfaces
+        self.populatecombo(self.NetInterfaces, self.NetIntG) 
+        #Populate Free Limit Capacity
+        self.populatecombo(self.FreeLimitCap, self.FrLimVG) 
+        #Populate per Money Capacity
+        self.populatecombo(self.MoneyCap, self.MoneyByteG) 
+        #Populate Reset Time
+        #self.populatecombo(self.ResetTime, self.RVEDG) 
+    
+
+        #----Populate spinbutton and enties with data----#
+        #Populate gtk.spinbuttons
+        self.FreeLimit.set_value(float(self.FrLimG))
+        self.Money.set_value(float(self.MoneyG))
+        self.ResetTimeNum.set_value(int(self.RVEG))
+        #Populate gtk.entries
+        self.Currency.set_text(self.CurG)
+        
+        self.ManualResetCheck(self.ManualRVE)
+
+    
+    def ManualResetCheck(self, v):
+        if v == 'False':
+            self.ManualReset.set_active(0)
+            #self.ResetTime.set_sensitive(False)
+            self.ResetTimeNum.set_sensitive(False)
+        else:
+            self.ManualReset.set_active(1)
+            #self.ResetTime.set_sensitive(True)
+            self.ResetTimeNum.set_sensitive(True)
+    
+    def checkbutton1_toggled(self, widget):
+        status = self.ManualReset.get_active()      
+        self.ManualResetCheck(str(status))
+
+    
+    def populatecombo(self, combo, value):
+        '''Populate combobox with string values read from a configuation file.
+        
+        We search the liststore from which the combobox is getting the data for the string value
+        and if we find it we set it as active.
+        '''
+        liststore = combo.get_model()
+        a = liststore.get_iter_first()
+        c = 0
+        while a:
+            if liststore.get(a,0)[0] == value:
+                combo.set_active(c)
+                break 
+            c = c + 1
+            a = liststore.iter_next(a)    
+    
+    
+    def checkInterface(self):
+        '''Checks whether the interface is up or not. It also calls the CheckDaemonRun function
+        
+        '''
+        self.checkIntEnab = 0
+        return_value = os.system('a=$(head -1 ~/.gtkvnstat/GTKvnstatConfig);ifconfig | grep $a')
+        if return_value != 0: #if the interface is down...
+            self.checkIntEnab = 1
+        else:
+            self.checkIntEnab = 0
+        self.CheckDaemonRun()
+    
+    
+    def CheckDaemonRun(self):
+        '''It checks if the vnstatd daemon is running.
+
+        If the daemon vnstatd is not running it enables or disables the selected interface. 
+        '''
+        daemoncheck = subprocess.Popen(["ps ax | grep vnstat | awk '{print $5,$6}'"], shell = True, stdout = subprocess.PIPE)
+        vndaemon = daemoncheck.stdout.read()
+        lines = vndaemon.split('\n')
+        self.daemonrunning = False
+        for line in range(len(lines)):
+            if lines[line] == "/usr/sbin/vnstatd -d":
+                self.daemonrunning = True
+        if self.daemonrunning == False:
+            ''' Enable or disable updates for  selected  interface.  Useful  for
+            interfaces  that  aren't  always  available,  like  ppp0. If the
+            interface goes down it should be  disabled  in  order  to  avoid
+            errors.  Add  something  like vnstat -r --disable -i ppp0 to the
+            script that's executed when the interface goes down  and  vnstat
+            --enable  -i  ppp0  to  the  up script. These two options aren't
+            needed when the daemon is used.'''
+            if self.checkIntEnab == 1: #if the interface is down...
+                os.system('a=$(head -1 ~/.gtkvnstat/GTKvnstatConfig);vnstat -r --disable -i $a')
+            else:
+                os.system('a=$(head -1 ~/.gtkvnstat/GTKvnstatConfig);vnstat --enable -i $a') 
+
+
+    #-----Check Vnstat Output-----#
+    def checkCurrentState(self):
+        self.checkInterface()
+        #self.ResetDbCron()
+        if self.checkIntEnab == 0: #if the interface is enabled...
+            self.FileReadConf()
+            self.Cost = 0
+            CheckState = subprocess.Popen(["a=$(head -1 ~/.gtkvnstat/GTKvnstatConfig);echo -n $(vnstat -i $a | grep total: | awk '{ print $2 }')"],shell=True, stdout=subprocess.PIPE)
+            data = CheckState.stdout.read()
+        
+            CheckSize = subprocess.Popen(["a=$(head -1 ~/.gtkvnstat/GTKvnstatConfig);echo -n $(vnstat -i $a | grep total: | awk '{ print $3 }')"],shell=True, stdout=subprocess.PIPE)
+            size = CheckSize.stdout.read()
+        
+            NLimit =  float(self.FrLimG) * 0.8 # NLimit = 80% of the FreeLimit(FrLimG)
+            if size == "MiB":
+                if self.FrLimVG == "MB":
+                    if float(data) >= float(self.FrLimG):
+                        return "Over"
+                    elif float(NLimit) < float(data) < float(self.FrLimG):
+                        return "Hot"
+                    else:
+                        return "Happy"
+                elif self.FrLimVG == "GB":
+                    if float(data) >= float(self.FrLimG)*1024:#if self.FrLimG(GB)<1
+                        return "Over"
+                    elif float(self.FrLimG)*1024 > float(data) > float(NLimit)*1024:
+                        return "Hot"
+                    else:
+                        return "Happy"
+                else:
+                        return "Happy"
+            elif size == "GiB":
+                if self.FrLimVG == "GB":
+                    if float(data) >= float(self.FrLimG):
+                        return "Over"
+                    elif float(data) < float(self.FrLimG):
+                        return "Happy"
+                    else:
+                        return "Hot"
+                else:
+                    return "Happy"
+            else:
+                return "Happy"
+        else:
+            return "Over" #to set the tray icon to warning!
+
+
+
+    #-----------Reset Command Method--------#
+    def ResetDb(self):
+        os.system('a=$(head -1 ~/.gtkvnstat/GTKvnstatConfig);vnstat -i $a --delete --force --sync;vnstat -u -i $a')
+    
+
+    def UpdateDb(self):
+        self.checkInterface()
+        self.FileReadConf()
+        if self.NetIntG != "none":
+            self.CheckInt = 1
+            if self.checkIntEnab == 0:
+                os.system('a=$(head -1 ~/.gtkvnstat/GTKvnstatConfig);vnstat -u -i $a')
+        else:
+            self.CheckInt = 0
+            message = gtk.MessageDialog(None, gtk.DIALOG_MODAL, gtk.MESSAGE_WARNING, gtk.BUTTONS_YES_NO, "No network interface selected!\nDo you want to select now?")
+            response = message.run()
+            if response == gtk.RESPONSE_YES:
+                # show the preferences window
+                message.hide()
+                self.window.show()
+            else:
+                message.hide()
+        
+
+    #-------Reset Database Method Cron-------#
+    #this should run once at startup!
+    def ResetDbCron(self):
+        self.FileReadConf()
+        self.FileReadDateConf()
+        dd5 = datetime.date.today().strftime("%d")
+        dm5 = datetime.date.today().strftime("%m")
+        dy5 = datetime.date.today().strftime("%y")
+        
+        fileHandle = open (GTKVNSTATHOME+"GTKvnstatDateConfig")
+        dddd = fileHandle.readline().strip("\n")
+        dddm = fileHandle.readline().strip("\n")
+        dddy = fileHandle.readline().strip("\n")
+        fileHandle.close()
+         
+        if int(dddy) < int(dy5):
+            #self.ResetDb()
+            self.ResetDataNowDialog(cron=True)
+            self.FileWriteDateConfCron()
+        
+        elif int(dddy) == int(dy5):
+            if int(dddm) < int(dm5):
+                #self.ResetDb()
+                self.ResetDataNowDialog(cron=True)
+                self.FileWriteDateConfCron()
+            elif int(dddm) == int(dm5):
+                if int(dddd) <= int(dd5):
+                    #self.ResetDb()
+                    self.ResetDataNowDialog(cron=True)
+                    self.FileWriteDateConfCron()
+
+    
+    #-----Read file methods-----#
+    def FileReadConf(self):
+        fileHandle = open (GTKVNSTATHOME+"GTKvnstatConfig")
+        self.NetIntG = fileHandle.readline().strip("\n")
+        self.FrLimG = fileHandle.readline().strip("\n")
+        self.FrLimVG = fileHandle.readline().strip("\n")
+        self.MoneyG = fileHandle.readline().strip("\n")
+        self.MoneyByteG = fileHandle.readline().strip("\n")
+        self.CurG = fileHandle.readline().strip("\n")
+        self.ManualRVE = fileHandle.readline().strip("\n")
+        self.RVEG = fileHandle.readline().strip("\n")
+        #self.RVEDG = fileHandle.readline().strip("\n")
+        fileHandle.close()
+
+
+    def FileReadDateConf(self):
+        fileHandle = open (GTKVNSTATHOME+"GTKvnstatDateConfig")
+        self.mera = fileHandle.readline().strip("\n")
+        self.mhnas = fileHandle.readline().strip("\n")
+        self.xronos = fileHandle.readline().strip("\n")
+        fileHandle.close()
+
+
+    #-----Write file methods-----#
+    def FileWriteConf(self):
+            
+        model1 = self.NetInterfaces.get_model()
+        activemodel1 = self.NetInterfaces.get_active()
+        NetInt = model1[activemodel1][0]
+        
+        FrLim = self.FreeLimit.get_value()
+        
+        model3 = self.FreeLimitCap.get_model()
+        activemodel3 = self.FreeLimitCap.get_active()
+        FrLimV = model3[activemodel3][0]
+        # if someone sets 0.45 GB then we save it as (0.45 * 1024 =) 460.80 MB !
+        if FrLimV == "GB":
+            if FrLim < 1:
+                FrLimV = "MB"
+                FrTMP = FrLim*1024
+                FrLim = FrTMP
+        
+        Money = self.Money.get_value()
+        
+        model2 = self.MoneyCap.get_model()
+        activemodel2 = self.MoneyCap.get_active()
+        MoneyByte = model2[activemodel2][0]
+        
+        Cur = self.Currency.get_text()
+        RVE = int(self.ResetTimeNum.get_value())
+        
+        ManualRVE = self.ManualReset.get_active()
+        
+        #model4 = self.ResetTime.get_model()
+        #activemodel4 = self.ResetTime.get_active()
+        #RVED = model4[activemodel4][0]
+        
+                
+        fileHandle = open (GTKVNSTATHOME+"GTKvnstatConfig", 'w' ) 
+        fileHandle.write (str(NetInt))
+        fileHandle.write ("\n")
+        fileHandle.write (str(FrLim))
+        fileHandle.write ("\n")
+        fileHandle.write (str(FrLimV))
+        fileHandle.write ("\n")
+        fileHandle.write (str(Money))
+        fileHandle.write ("\n")
+        fileHandle.write (str(MoneyByte))
+        fileHandle.write ("\n")
+        fileHandle.write (str(Cur))
+        fileHandle.write ("\n")
+        fileHandle.write (str(ManualRVE))
+        fileHandle.write ("\n")
+        fileHandle.write (str(RVE))
+        #fileHandle.write ("\n")
+        #fileHandle.write (str(RVED))
+        fileHandle.close()
+
+
+
+    def FileWriteDateConf(self):
+        self.FileReadConf()
+        dd1 = datetime.date.today().strftime("%d")
+        dm1 = datetime.date.today().strftime("%m")
+        dy1 = datetime.date.today().strftime("%y")
+        ddd1 = 0
+        ddd2 = 0
+        ddd3 = 0
+        
+        #if self.RVEDG == "Days":
+        ddd = datetime.date.today() + datetime.timedelta(int(self.RVEG))
+        ddd1 = int(ddd.strftime("%d"))
+        ddd2 = int(ddd.strftime("%m"))
+        ddd3 = int(ddd.strftime("%y"))
+        # else: #Months
+        # It doen't works correctly as we don't know whether a month has 30 or 31 days. There is no need to use months...
+        #     if int(self.RVEG) < 12:
+        #         ddd1 = int(dd1)
+        #        ddd2 = int(dm1) + int(self.RVEG)
+        #        ddd3 = int(dy1)
+        #    else:
+        #        RVE2 = self.RVEG / 12
+        #        RVE1 = int(self.RVEG) - (12 * int(RVE2))
+        #        ddd1 = int(dd1)
+        #        ddd2 = int(dm1) + RVE1
+        #        ddd3 = int(dy1) + RVE2
+                
+        fileHandle = open (GTKVNSTATHOME+"GTKvnstatDateConfig", 'w')
+        fileHandle.write ( str(ddd1))
+        fileHandle.write ("\n")
+        fileHandle.write ( str(ddd2))
+        fileHandle.write ("\n")
+        fileHandle.write ( str(ddd3))
+        fileHandle.close()
+
+
+    def FileWriteDateConfCron(self):
+        self.FileReadDateConf()
+        self.FileReadConf()
+        dd1 = int(self.mera)
+        dm1 = int(self.mhnas)
+        dy1 = int(self.xronos)
+        dy2 = dy1 + 2000
+        ddd1 = 0
+        ddd2 = 0
+        ddd3 = 0
+        
+        #self.RVEDG = "Days" #Temporary
+        #if self.RVEDG == "Days":
+        ddd = datetime.date(dy2, dm1, dd1) + datetime.timedelta(int(self.RVEG))
+        ddd1 = int(ddd.strftime("%d"))
+        ddd2 = int(ddd.strftime("%m"))
+        ddd3 = int(ddd.strftime("%y"))
+        # else: #Months
+        # It doen't works correctly as we don't know whether a month has 30 or 31 days. There is no need to use months...
+        #    if int(self.RVEG) < 12:
+        #        ddd1 = int(dd1)
+        #        ddd2 = int(dm1) + int(self.RVEG)
+        #        ddd3 = int(dy1)
+        #    else:
+        #        RVE2 = self.RVEG / 12
+        #        RVE1 = int(self.RVEG) - (12 * int(RVE2))
+        #        ddd1 = int(dd1)
+        #        ddd2 = int(dm1) + RVE1
+        #        ddd3 = int(dy1) + RVE2
+                
+        fileHandle = open (GTKVNSTATHOME+"GTKvnstatDateConfig", 'w')
+        fileHandle.write ( str(ddd1))
+        fileHandle.write ("\n")
+        fileHandle.write ( str(ddd2))
+        fileHandle.write ("\n")
+        fileHandle.write ( str(ddd3))
+        fileHandle.close()
+
+    def button1_pressed(self, widget, event):
+        model1 = self.NetInterfaces.get_model()
+        activemodel1 = self.NetInterfaces.get_active()
+        TxC = model1[activemodel1][0]
+        if TxC == "none":
+            message = gtk.MessageDialog(None, gtk.DIALOG_MODAL, gtk.MESSAGE_WARNING, gtk.BUTTONS_OK, "You must select one Network Interface.")
+            response = message.run()
+            if response == gtk.RESPONSE_OK:
+                message.hide()
+        else:
+            self.FileWriteConf()
+            self.FileWriteDateConf()
+            self.FileReadConf()
+            self.UpdateDb()
+            self.window.hide()
+        
+    def button2_pressed(self, widget, event):
+        self.window.hide()
+        
+    
+    def vnstatInfo(self, showDetails):
+        self.UpdateDb()
+        if self.checkIntEnab == 0:
+            if self.CheckInt == 1:
+                #OLD WAY:
+                #CheckState = subprocess.Popen(["inter=$(a=$(head -1 ~/.gtkvnstat/GTKvnstatConfig);echo -n `vnstat -i $a | grep -7 Database` | awk '{ print $8 }'); \
+                #dbdate=$(a=$(head -1 ~/.gtkvnstat/GTKvnstatConfig);echo -n `vnstat -i $a | grep -7 Database` | awk '{ print $10 }'); \
+                #rec=$(a=$(head -1 ~/.gtkvnstat/GTKvnstatConfig);echo -n `vnstat -i $a  | grep -7 Database` | awk '{ print $12,$13 }'); \
+                #tran=$(a=$(head -1 ~/.gtkvnstat/GTKvnstatConfig);echo -n `vnstat -i $a  | grep -7 Database` | awk '{ print $15,$16 }'); \
+                #total=$(a=$(head -1 ~/.gtkvnstat/GTKvnstatConfig);echo -n `vnstat -i $a  | grep -7 Database` | awk '{ print $18,$19 }'); \
+                #RSdate=$(a=$(head -1 ~/.gtkvnstat/GTKvnstatConfig);echo -n `cat ~/.gtkvnstat/GTKvnstatDateConfig` | sed '/^$/d' | sed 's/\ /-/g'); \
+                #echo $inter, $total, $rec, $tran, $dbdate, $RSdate"],shell=True, stdout=subprocess.PIPE)
+                
+                #NEW WAY:
+                CheckState = subprocess.Popen(["a=$(head -1 ~/.gtkvnstat/GTKvnstatConfig);vnstat -i $a --oneline"],shell=True, stdout=subprocess.PIPE)
+                #For both old and new ways:
+                data = CheckState.stdout.read()
+                
+                #OLD WAY:
+                #datalist = data.split(',')
+                #for info in range(len(datalist)):
+                #    datalist[info] = datalist[info].strip()
+                #print datalist
+                #down = datalist[2].split(' ')
+                
+                #NEW WAY:
+                datalist = data.split(';')
+                if self.ManualRVE == 'True':
+                    down = datalist[12].split(' ')
+                else:
+                    down = datalist[8].split(' ')
+                
+                print down
+                if down[0] =='':
+                    pynotify.init('gtkvnstat-osd-info')
+                    n = pynotify.Notification("Network traffic data via vnstat", "Not enough data yet...")
+                    n.show()
+                else:
+                    self.Cost = 0
+                    if float(self.FrLimG) == 0: #added in 0.2.2 to avoid zero divizion error when no free limit is set...
+                        if down[1] == "MiB":
+                            remain = float(self.FrLimG) - float(down[0])# this would be <0
+                            CostData = float(down[0])
+                            if self.MoneyByteG == "MB":
+                                CostDataM = float(CostData) * float(self.MoneyG)
+                            else:#KB
+                                CostDataM1 = float(self.MoneyG) * 1024
+                                CostDataM = float(CostData) * float(CostDataM1)
+                            self.Cost = CostDataM
+                        elif down[1] == "KiB":
+                            remain = float(self.FrLimG) - float(down[0])# this would be <0
+                            CostData = float(down[0])
+                            if self.MoneyByteG == "MB":
+                                CostDataM = float(CostData) * float(self.MoneyG)/1024
+                            else:#KB
+                                CostDataM1 = float(self.MoneyG)
+                                CostDataM = float(CostData) * float(CostDataM1)
+                            self.Cost = CostDataM
+                        elif down[1] == "GiB": #Free Limit's maximum value is 1023MB!
+                            remain = float(self.FrLimG) - float(down[0]) # this would be <0
+                            CostData = float(down[0])
+                            if self.MoneyByteG == "MB":
+                                CostDataM = float(CostData) * float(self.MoneyG) * 1024
+                            else:#KB
+                                CostDataM1 = float(self.MoneyG) * 1024 * 1024
+                                CostDataM = float(CostData) * float(CostDataM1)
+                            self.Cost = CostDataM
+                    elif self.FrLimVG == "MB":
+                        if down[1] == "MiB":
+                            remain = float(self.FrLimG) - float(down[0])
+                            #remaindata = str(remain) + " MB"
+                            remaindata = "(%.2f%s) %s %s" %(remain/float(self.FrLimG)*100,"%",str(remain), "MB")
+                            if float(down[0]) >= float(self.FrLimG):
+                                CostData = float(down[0]) - float(self.FrLimG)
+                                if self.MoneyByteG == "MB":
+                                    CostDataM = float(CostData) * float(self.MoneyG)
+                                else:#KB
+                                    CostDataM1 = float(self.MoneyG) * 1024
+                                    CostDataM = float(CostData) * float(CostDataM1)
+                                self.Cost = CostDataM
+                        elif down[1] == "KiB":
+                            remain = float(self.FrLimG) * 1024 - float(down[0])
+                            #remaindata = str(remain//1024) + " MB and " + str(remain%1024) + " KB"  
+                            remaindata = "(%.2f%s) %s MB and %s KB" %((remain/(float(self.FrLimG)*1024)*100), "%", str(remain//1024), str(remain%1024))
+                        elif down[1] == "GiB": #Free Limit's maximum value is 1023MB!
+                            remain = float(self.FrLimG) - float(down[0]) * 1024# this would be <0
+                            #remaindata = str(remain) + " MB"
+                    elif self.FrLimVG == "GB":
+                        if down[1] == "GiB":
+                            remain = float(self.FrLimG) - float(down[0])
+                            #remaindata = str(remain) + " GB"
+                            remaindata = "(%.2f%s) %s %s" %((remain/float(self.FrLimG)*100), "%", str(remain)," GB")
+                            if float(down[0]) >= float(self.FrLimG):
+                                CostData = float(data) - float(self.FrLimG)
+                                if self.MoneyByteG == "MB":
+                                    CostDataM1 = float(self.MoneyG) * 1024                           
+                                    CostDataM = float(CostData) * float(CostDataM1)
+                                else:#KB
+                                    CostDataM = float(CostData) * float(self.MoneyG) * 1024 * 1024
+                                self.Cost = CostDataM
+                                #print self.Cost
+                        elif down[1] == "MiB":
+                            remain = float(self.FrLimG) * 1024 - float(down[0])
+                            remaindata = "(%.2f%s) %s GB and %s MB" %((remain/(float(self.FrLimG)*1024)*100),"%",str(remain//1024),str(remain%1024))
+                            if float(down[0]) >= float(self.FrLimG)*1024: #if self.FrLimG(GB)<1
+                                CostData = float(down[0]) - float(self.FrLimG)*1024
+                                CostDataM = float(CostData) * float(self.MoneyG) * 1024
+                                self.Cost = CostDataM
+                        else: #if downloaded kibs
+                            remain = float(self.FrLimG) * 1024 * 1024 - float(down[0])
+                            remaindata = str(remain//(1024*1024)) + " GB," + str((remain%(1024*1024))//1024) + " MB and "  + str((remain%(1024*1024))%1024) + "KB"
+                        
+                            
+                    #print remaindata
+                    if remain < 0:
+                        remaindata = "No Free Data!"
+                        imageURI = "stock_dialog-warning"
+                    else:
+                        imageURI ="stock_dialog-info"
+                    
+                    #OLD WAY:
+                    #basic = "Downloaded: %s\nRemaining Free Data: %s\n Cost: %.3f %s" %(datalist[2], remaindata, self.Cost, self.CurG)
+                    #full = "Data since: %s for interface: %s\nTotal Traffic: %s\nDownloaded: %s\nUploaded: %s\nRemaining Free Data: %s\nCost: %.2f %s\n\nReseting at: %s" %(datalist[4], datalist[0], datalist[1], datalist[2], datalist[3],remaindata, self.Cost, self.CurG, datalist[5])
+                    
+                    #NEW WAY:
+                    if self.ManualRVE == 'True': #should use total data
+                        #Get the date that the counters have been resetted:
+                        sincedata = subprocess.Popen(["(a=$(head -1 ~/.gtkvnstat/GTKvnstatConfig);vnstat -i $a | grep $a | awk '{print $3}')"], shell=True, stdout=subprocess.PIPE)
+                        sincedate=sincedata.stdout.read().strip('\n').split('/')
+                        #Convert the date to European Format (d/m/y)
+                        sincedateEU=[]
+                        sincedateEU.append(sincedate[1])
+                        sincedateEU.append(sincedate[0])
+                        sincedateEU.append(sincedate[2])
+                        sinceEU = ('/').join(sincedateEU)
+                        RSschedule=subprocess.Popen(["(a=$(head -1 ~/.gtkvnstat/GTKvnstatConfig);echo -n `cat ~/.gtkvnstat/GTKvnstatDateConfig` | sed '/^$/d' | sed 's/\ /\//g')"], shell=True, stdout = subprocess.PIPE)
+                        RSdate = RSschedule.stdout.read()
+                        basic = "Downloaded: %s\nRemaining Free Data: %s\n Cost: %.3f %s" %(datalist[12], remaindata, self.Cost, self.CurG)
+                        full = "Data since: %s for interface: %s\nTotal Traffic: %s\nDownloaded: %s\nUploaded: %s\nRemaining Free Data: %s\nCost: %.2f %s\n\nManual counter reset scheduled at: %s" %(sinceEU, datalist[1], datalist[14], datalist[12], datalist[13],remaindata, self.Cost, self.CurG, RSdate)
+                    else: #should use monthly data
+                        monthrotate = subprocess.Popen(["vnstat --showconfig | grep MonthRotate | awk '{print $2}'"],shell=True, stdout=subprocess.PIPE)
+                        monthrotate_day = monthrotate.stdout.read().strip('\n')
+                        basic = "Downloaded: %s\nRemaining Free Data: %s\n Cost: %.3f %s" %(datalist[8], remaindata, self.Cost, self.CurG)
+                        full = "Data for: %s for interface: %s\nTotal Traffic: %s\nDownloaded: %s\nUploaded: %s\nRemaining Free Data: %s\nCost: %.2f %s\n\nMonthly counter reset at %s next Month's" %(datalist[7], datalist[1], datalist[10], datalist[8], datalist[9],remaindata, self.Cost, self.CurG, monthrotate_day)
+                    
+                    pynotify.init('gtkvnstat-osd-info')
+                    if showDetails:
+                        n = pynotify.Notification("Network traffic data via vnstat", full, imageURI)
+                    else:
+                        n = pynotify.Notification("Network traffic data via vnstat", basic, imageURI)
+                    n.show()
+        else:
+            if self.CheckInt == 1:
+                pynotify.init('gtkvnstat-osd-info')
+                n = pynotify.Notification("Error!", "The Selected Network Interface is Down", "stock_dialog-error")
+                n.set_urgency(pynotify.URGENCY_NORMAL)
+                n.show()
+        
+
+    def ResetDataNowDialog(self, cron=False):
+        if cron == True:
+            rstmsg = "You have scheduled data counters to be resetted today!\nDo you really want to do this?\
+            \nIf your answer is 'No' then the next reset day will be calculated based on the days you already have in the Reset Values Every textbox."
+        else:
+            rstmsg = "Data Counters will be resetted!\nDo you really want to do this?"
+        
+        exit = gtk.MessageDialog(None, gtk.DIALOG_MODAL, gtk.MESSAGE_WARNING, gtk.BUTTONS_YES_NO, rstmsg)
+        response = exit.run()
+        exit.hide()
+        
+        if response == gtk.RESPONSE_YES:
+            self.checkInterface()
+            if self.daemonrunning == False:
+                print "Deleting monitored inderface from vnstat's database..."
+                os.system('a=$(head -1 ~/.gtkvnstat/GTKvnstatConfig);vnstat -i $a --delete --force --sync')
+                print "Creating a new database..."
+                os.system('a=$(head -1 ~/.gtkvnstat/GTKvnstatConfig);vnstat -u -i $a')
+                #Why would one need to reset the configuration files??? One could alter anything from Preferences dialog...
+                #print "Initializing Configuration Files..."
+                #fE = open(GTKVNSTATHOME+"GTKvnstatConfig", 'w' )
+                ##fE.write ( "none\n0\nMB\n0\nKB\nEuro\nFalse\n1\nDays" )
+                #fE.write ( "none\n0\nMB\n0\nKB\nEuro\nFalse\n1" )
+                #fE.close()
+                #fE1 = open(GTKVNSTATHOME+"GTKvnstatDateConfig", 'w' )
+                #fE1.write ( "1\n1\n1" )
+                #fE1.close()
+                print "Done!"
+            else:
+                a = subprocess.Popen(["gksudo service vnstat stop"],shell=True, stdout=subprocess.PIPE)
+                al = a.stdout.read()
+                #print al
+                try:
+                    alines = al.split('...')
+                    #print alines
+                    if alines[1] == "done.\n":
+                        print "vnstat daemon has been stopped.\nDeleting monitored inderface from vnstat's database..."
+                        os.system('a=$(head -1 ~/.gtkvnstat/GTKvnstatConfig);vnstat -i $a --delete --force --sync')
+                        print "Restaring vnstat daemon..."
+                        os.system('a=$(head -1 ~/.gtkvnstat/GTKvnstatConfig);vnstat -u -i $a')
+                        print "Finished!"
+                    else: #if alines[1] == "fail!\n":
+                        print "failed to stop vnstat daemon... Reseting data counters aborted!"
+                except IndexError: #propably gksudo has been Canceled or the password was wrong...
+                    print "aborting reset"
+        else:
+            print "aborting reset"
+
+        
+        
+class Check(object):
+    def __init__(self):
+        if not os.path.exists(GTKVNSTATHOME):
+            os.mkdir(GTKVNSTATHOME)
+    
+        try:
+            #fE = open (GTKVNSTATHOME+"GTKvnstatConfig", 'r' )
+            GTKvnstat().FileReadConf()
+            if GTKvnstat().ManualRVE == 'True':
+                print "Manual data counter reset is enabled.\nChecking schedule..."
+                GTKvnstat().ResetDbCron()                
+            else:
+                print "Manual data counter reset is disabled."
+        except IOError, e:
+            if e.errno == errno.ENOENT:
+                fE = open(GTKVNSTATHOME+"GTKvnstatConfig", 'w' )
+                #fE.write ( "none\n0\nMB\n0\nKB\nEuro\nFalse\n1\nDays" )
+                fE.write ( "none\n0\nMB\n0\nKB\nEuro\nFalse\n1" )
+                fE.close()
+        try:
+            fE = open (GTKVNSTATHOME+"GTKvnstatDateConfig", 'r' )
+        except IOError, e:
+            if e.errno == errno.ENOENT:
+                fE = open(GTKVNSTATHOME+"GTKvnstatDateConfig", 'w' )
+                fE.write ("1\n1\n1")
+                fE.close()
+
+
+if __name__ == "__main__":
+    Check()
+    GTKvnstat().UpdateDb()
+    indicator = GTKvnstatIndicator()
+    gtk.main()
+
